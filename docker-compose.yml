@@ -1,0 +1,24 @@
+services:
+  florence:
+    build: .
+    image: florence-tracker:latest
+    container_name: florence-tracker
+    ports:
+      - "8080:8080"
+    restart: unless-stopped         # survives reboots; respects a manual stop
+    environment:
+      FLORENCE_CACHE_TTL: "60"      # don't poll USGS faster than its ~1-min cadence
+    volumes:
+      - florence-cache:/cache       # last-good feeds persist across restarts
+    # mem_limit only applies if cgroup memory is enabled on the Pi — see README.
+    mem_limit: 256m
+    mem_reservation: 64m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+
+volumes:
+  florence-cache:

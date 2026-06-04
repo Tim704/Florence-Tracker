@@ -1,0 +1,57 @@
+[Unit]
+Description=Florence's Seismic Travel Bureau (USGS earthquake tracker)
+Documentation=https://github.com/florence-tracker
+# A server that reaches USGS on start wants the network actually up, not just configured.
+After=network-online.target
+Wants=network-online.target
+# Give up after 5 crashes in 60s instead of restarting forever (these are
+# [Unit]-section keys; systemd ignores them under [Service]).
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=florence
+Group=florence
+WorkingDirectory=/opt/florence-tracker
+
+# Absolute interpreter + script; -u streams logs straight into the journal.
+ExecStart=/usr/bin/python3 -u /opt/florence-tracker/server.py
+Environment=PYTHONUNBUFFERED=1
+Environment=FLORENCE_HOST=0.0.0.0
+Environment=FLORENCE_PORT=8080
+Environment=FLORENCE_STATIC_DIR=/opt/florence-tracker/public
+# systemd creates /var/cache/florence-tracker (owned by the service user, reboot-
+# persistent) and exposes it as %C/... ; the app keeps its last-good feeds there.
+CacheDirectory=florence-tracker
+CacheDirectoryMode=0750
+Environment=FLORENCE_CACHE_DIR=%C/florence-tracker
+
+# Restart on crash, but not on a clean `systemctl stop` (storm cap is in [Unit]).
+Restart=on-failure
+RestartSec=5
+
+# --- sandboxing / hardening (all verified safe with network egress + cache writes) ---
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

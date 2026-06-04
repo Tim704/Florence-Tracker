@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#06080c" />
+<title>Florence's Seismic Travel Bureau</title>
+
+<!-- vendored locally so the app loads with no CDN; falls back to CDN if missing -->
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css"
+      onerror="this.onerror=null;this.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<style>
+:root{
+  --bg:#06080c;
+  --panel:rgba(11,15,21,.80);
+  --panel-solid:#0b0f15;
+  --ink:#ECEAE3;
+  --muted:#828B99;
+  --line:rgba(255,176,0,.16);
+  --line-soft:rgba(255,255,255,.06);
+  --amber:#FFB000;
+  --amber-dim:#a8761a;
+  --orange:#FF7A1A;
+  --rose:#FF3D5E;
+  --mint:#46E3B3;
+  --red:#FF2D2D;
+}
+
+*{box-sizing:border-box;}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+  font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;overflow:hidden;}
+
+#map{position:absolute;inset:0;background:#06080c;z-index:0;}
+
+/* atmosphere overlays */
+.scanlines{position:fixed;inset:0;pointer-events:none;z-index:500;mix-blend-mode:overlay;opacity:.35;
+  background:repeating-linear-gradient(0deg,rgba(255,255,255,.05) 0 1px,transparent 1px 3px);}
+.vignette{position:fixed;inset:0;pointer-events:none;z-index:499;
+  box-shadow:inset 0 0 240px 40px rgba(0,0,0,.85);}
+
+/* generic panel */
+.panel{position:absolute;z-index:600;background:var(--panel);
+  border:1px solid var(--line);border-radius:14px;
+  backdrop-filter:blur(14px) saturate(120%);-webkit-backdrop-filter:blur(14px) saturate(120%);
+  box-shadow:0 18px 50px -20px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.04);}
+
+.label{font-size:9.5px;letter-spacing:.22em;text-transform:uppercase;color:var(--amber-dim);}
+.divider{height:1px;background:var(--line-soft);margin:10px 0;}
+
+/* HEADER */
+#header{top:16px;left:16px;padding:14px 18px;max-width:340px;}
+#header .kicker{display:flex;align-items:center;gap:8px;}
+#header .dot{width:7px;height:7px;border-radius:50%;background:var(--amber);
+  box-shadow:0 0 10px var(--amber);animation:blink 2.4s steps(2) infinite;}
+#header h1{font-family:"Bricolage Grotesque",sans-serif;font-weight:800;
+  font-size:21px;line-height:1.02;margin:8px 0 4px;letter-spacing:-.01em;color:#fff;}
+#header .sub{font-size:10.5px;color:var(--muted);line-height:1.45;}
+
+/* FEED control top-right */
+#feedbox{top:16px;right:16px;padding:12px 14px;min-width:212px;}
+#feedbox .row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;}
+select#feed{width:100%;margin-top:6px;background:#0d1219;color:var(--ink);
+  border:1px solid var(--line);border-radius:8px;padding:7px 8px;
+  font-family:inherit;font-size:11px;cursor:pointer;outline:none;}
+select#feed:focus{border-color:var(--amber);}
+#count{font-family:"Bricolage Grotesque",sans-serif;font-weight:800;font-size:18px;color:#fff;}
+#updated{font-size:9px;color:var(--muted);}
+#refresh{background:transparent;border:1px solid var(--line);color:var(--amber);
+  border-radius:8px;padding:6px 9px;font-family:inherit;font-size:10px;cursor:pointer;
+  letter-spacing:.05em;transition:.15s;}
+#refresh:hover{background:rgba(255,176,0,.1);}
+#refresh:active{transform:scale(.96);}
+
+/* data-source + auto-refresh row */
+.srcrow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:9px;}
+.srcpill{display:inline-flex;align-items:center;gap:6px;font-size:9px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted);}
+.srcpill i{width:7px;height:7px;border-radius:50%;background:var(--muted);transition:.2s;}
+.mini{background:transparent;border:1px solid var(--line);color:var(--muted);border-radius:7px;
+  padding:4px 8px;font-family:inherit;font-size:9px;letter-spacing:.08em;cursor:pointer;transition:.15s;}
+.mini:hover{border-color:var(--amber);color:var(--amber);}
+.mini.on{color:var(--mint);border-color:rgba(70,227,179,.45);background:rgba(70,227,179,.06);}
+
+/* NOW ARRIVING card */
+#now{bottom:84px;left:16px;width:360px;max-width:calc(100vw - 32px);padding:16px 18px;}
+#now .place{font-family:"Bricolage Grotesque",sans-serif;font-weight:700;
+  font-size:18px;line-height:1.15;color:#fff;margin:6px 0 2px;min-height:22px;}
+#now .stats{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;}
+.stat{border:1px solid var(--line-soft);border-radius:8px;padding:6px 9px;min-width:62px;}
+.stat .k{font-size:8.5px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;}
+.stat .v{font-size:14px;font-weight:600;margin-top:2px;}
+.magchip{display:inline-flex;align-items:center;gap:6px;}
+.magchip i{width:9px;height:9px;border-radius:50%;display:inline-block;}
+.tsunami{border-color:rgba(255,45,45,.5)!important;color:var(--red);}
+.telegram{font-size:12.5px;line-height:1.5;color:var(--ink);
+  background:rgba(255,176,0,.05);border-left:2px solid var(--amber);
+  padding:10px 12px;border-radius:0 8px 8px 0;min-height:42px;}
+.telegram .cur{display:inline-block;width:7px;height:14px;background:var(--amber);
+  margin-left:2px;vertical-align:-2px;animation:blink 1s steps(2) infinite;}
+
+/* PASSPORT log */
+#passport{top:108px;right:16px;width:236px;max-height:46vh;padding:12px 6px 12px 14px;
+  display:flex;flex-direction:column;}
+#passport .head{display:flex;align-items:center;justify-content:space-between;padding-right:8px;}
+#log{overflow-y:auto;margin-top:8px;padding-right:8px;}
+#log::-webkit-scrollbar{width:6px;}
+#log::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px;}
+.stamp{display:flex;gap:9px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line-soft);
+  opacity:0;transform:translateX(8px);animation:slidein .35s forwards;cursor:pointer;}
+.stamp:hover .sp{color:#fff;}
+.stamp .no{font-size:9px;color:var(--muted);width:18px;flex:none;padding-top:2px;}
+.stamp .mg{font-weight:600;font-size:12px;width:30px;flex:none;}
+.stamp .sp{font-size:10.5px;color:var(--muted);line-height:1.3;
+  overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+
+/* LEGEND */
+#legend{bottom:16px;right:16px;padding:10px 13px;}
+#legend .scale{display:flex;gap:2px;margin-top:7px;}
+#legend .sw{width:26px;height:7px;}
+#legend .ticks{display:flex;justify-content:space-between;font-size:8px;color:var(--muted);margin-top:4px;}
+
+/* CONTROL BAR */
+#controls{bottom:16px;left:50%;transform:translateX(-50%);
+  display:flex;align-items:center;gap:14px;padding:10px 16px;z-index:601;max-width:calc(100vw - 32px);}
+#controls button.ctl{background:transparent;border:1px solid var(--line);color:var(--ink);
+  width:38px;height:38px;border-radius:10px;font-size:15px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:.15s;flex:none;}
+#controls button.ctl:hover{border-color:var(--amber);color:var(--amber);background:rgba(255,176,0,.07);}
+#controls button.ctl:active{transform:scale(.94);}
+#controls button.ctl.on{border-color:var(--amber);color:var(--amber);background:rgba(255,176,0,.1);}
+#play{width:46px;height:46px;border-color:var(--amber);color:var(--amber);font-size:18px;}
+#play:hover{background:rgba(255,176,0,.14);}
+#progress{font-size:10px;color:var(--muted);min-width:78px;text-align:center;letter-spacing:.04em;}
+#progress b{color:#fff;font-size:13px;}
+.speedwrap{display:flex;align-items:center;gap:8px;}
+input#speed{width:84px;accent-color:var(--amber);cursor:pointer;}
+#speedval{font-size:10px;color:var(--amber);width:30px;}
+.sep{width:1px;height:24px;background:var(--line-soft);}
+
+/* STATUS / banners */
+#status{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:700;
+  background:var(--panel-solid);border:1px solid var(--line);border-radius:12px;
+  padding:18px 26px;font-size:12px;letter-spacing:.06em;text-align:center;display:none;}
+#status .spin{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--amber);
+  box-shadow:0 0 12px var(--amber);animation:blink .7s steps(2) infinite;margin-right:8px;vertical-align:1px;}
+#banner{position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:702;
+  background:rgba(40,12,12,.92);border:1px solid rgba(255,45,45,.5);color:#ffd0d0;
+  padding:8px 16px;border-radius:10px;font-size:11px;display:none;max-width:90vw;text-align:center;}
+
+/* Florence marker */
+.fveh-wrap{position:absolute;transform:translate(-50%,-50%);}
+.fveh{font-size:26px;display:block;line-height:1;transition:transform .25s ease;
+  filter:drop-shadow(0 3px 5px rgba(0,0,0,.7));}
+.florence.flying .fveh{animation:bob 1.15s ease-in-out infinite;}
+.florence.landed .fveh{animation:plop .55s cubic-bezier(.34,1.56,.64,1);}
+.fbubble{position:absolute;left:0;top:0;transform:translate(-50%,-100%);margin-top:-30px;
+  background:var(--panel-solid);border:1px solid var(--amber);color:var(--ink);
+  padding:8px 11px;border-radius:10px;font-size:11px;line-height:1.4;
+  width:max-content;max-width:230px;text-align:left;pointer-events:none;
+  opacity:0;transition:opacity .3s,transform .3s;box-shadow:0 10px 26px -10px rgba(0,0,0,.9);}
+.fbubble.show{opacity:1;}
+.fbubble:after{content:"";position:absolute;left:50%;bottom:-6px;transform:translateX(-50%) rotate(45deg);
+  width:10px;height:10px;background:var(--panel-solid);border-right:1px solid var(--amber);border-bottom:1px solid var(--amber);}
+
+/* pulsing halo on current epicentre */
+.halo{width:0;height:0;}
+.halo span{position:absolute;left:0;top:0;border-radius:50%;border:1.5px solid var(--amber);
+  transform:translate(-50%,-50%);animation:ping 1.7s ease-out infinite;}
+
+/* leaflet chrome theming */
+.leaflet-container{background:#06080c;font-family:inherit;}
+.leaflet-control-zoom a{background:rgba(11,15,21,.9)!important;color:var(--ink)!important;
+  border:1px solid var(--line)!important;backdrop-filter:blur(8px);}
+.leaflet-control-zoom a:hover{color:var(--amber)!important;}
+.leaflet-control-attribution{background:rgba(6,8,12,.75)!important;color:var(--muted)!important;font-size:9px!important;}
+.leaflet-control-attribution a{color:var(--amber-dim)!important;}
+.leaflet-tooltip{background:var(--panel-solid);border:1px solid var(--line);color:var(--ink);
+  font-family:inherit;font-size:10px;border-radius:6px;box-shadow:none;}
+.leaflet-tooltip:before{display:none;}
+
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:.15}}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+@keyframes plop{0%{transform:scale(.4)}60%{transform:scale(1.25)}100%{transform:scale(1)}}
+@keyframes ping{0%{opacity:.85;width:16px;height:16px}100%{opacity:0;width:64px;height:64px}}
+@keyframes slidein{to{opacity:1;transform:translateX(0)}}
+
+/* kiosk: hide the cursor on an unattended display */
+body.kiosk, body.kiosk *{cursor:none!important;}
+
+/* responsive */
+@media (max-width:860px){
+  #passport,#legend{display:none;}
+  #feedbox{min-width:172px;}
+  #now{width:calc(100vw - 32px);bottom:96px;}
+  #header{max-width:200px;}
+}
+@media (max-width:540px){
+  #controls{gap:9px;padding:8px 11px;}
+  #controls button.ctl{width:34px;height:34px;}
+  #play{width:42px;height:42px;}
+  input#speed{width:60px;}
+  #header h1{font-size:17px;}
+  .speedwrap .label{display:none;}
+}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="scanlines"></div>
+<div class="vignette"></div>
+
+<div id="header" class="panel">
+  <div class="kicker"><span class="dot"></span><span class="label">Seismic Travel Bureau</span></div>
+  <h1>Florence's Fault-Line Itinerary</h1>
+  <div class="sub">Live USGS epicentres, visited in chronological order by one tireless traveller.</div>
+</div>
+
+<div id="feedbox" class="panel">
+  <span class="label">Live feed</span>
+  <select id="feed" aria-label="Earthquake feed"></select>
+  <div class="row">
+    <div><div id="count">—</div><div id="updated">awaiting data…</div></div>
+    <button id="refresh" title="Reload feed">↻ REFRESH</button>
+  </div>
+  <div class="srcrow">
+    <span id="src" class="srcpill"><i id="srcdot"></i><span id="srctxt">connecting…</span></span>
+    <button id="autobtn" class="mini" title="Auto-refresh feed">AUTO</button>
+  </div>
+</div>
+
+<div id="passport" class="panel">
+  <div class="head"><span class="label">Florence's passport</span><span id="stampcount" class="label">0</span></div>
+  <div id="log"></div>
+</div>
+
+<div id="legend" class="panel">
+  <span class="label">Magnitude</span>
+  <div class="scale" id="legscale"></div>
+  <div class="ticks"><span>&lt;2.5</span><span>4</span><span>5</span><span>6</span><span>7+</span></div>
+</div>
+
+<div id="now" class="panel">
+  <span class="label">Now arriving</span>
+  <div class="place" id="np">Press play to begin the tour</div>
+  <div class="stats" id="nstats"></div>
+  <div class="telegram" id="ntel">Florence is checking her boarding pass.<span class="cur"></span></div>
+</div>
+
+<div id="controls" class="panel">
+  <button class="ctl" id="prev" title="Previous stop (←)">⏮</button>
+  <button class="ctl" id="play" title="Play / pause (space)">▶</button>
+  <button class="ctl" id="next" title="Next stop (→)">⏭</button>
+  <div id="progress">stop <b id="cur">0</b> / <span id="total">0</span></div>
+  <div class="speedwrap"><span class="label">Speed</span>
+    <input id="speed" type="range" min="1" max="8" value="2" />
+    <span id="speedval">1x</span>
+  </div>
+  <div class="sep"></div>
+  <button class="ctl" id="loop" title="Loop tour (L)">∞</button>
+  <button class="ctl" id="fs" title="Fullscreen (F)">⛶</button>
+</div>
+
+<div id="banner"></div>
+<div id="status"><span class="spin"></span><span id="statustxt">Scanning the planet…</span></div>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script>/* CDN fallback if the vendored copy is unavailable */
+window.L || document.write('<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>');
+</script>
+<script>
+"use strict";
+
+/* ---------- config ---------- */
+const FEED_BASE = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/";
+const LOCAL_API = "/api/feed?id=";           // our caching Python proxy
+const ON_FILE   = location.protocol === "file:";
+const FEEDS = [
+  {id:"4.5_week",         label:"M4.5+ · past 7 days"},
+  {id:"significant_week", label:"Significant · past 7 days"},
+  {id:"2.5_day",          label:"M2.5+ · past 24 hours"},
+  {id:"4.5_month",        label:"M4.5+ · past 30 days"},
+  {id:"all_hour",         label:"All quakes · past hour"},
+];
+const MAX_STOPS = 50;
+
+/* ---------- preferences (localStorage, URL params override) ---------- */
+const PARAMS = new URLSearchParams(location.search);
+function pref(key, fallback){
+  try{ const v = localStorage.getItem("florence."+key); return v===null?fallback:v; }
+  catch(e){ return fallback; }
+}
+function setPref(key, val){
+  try{ localStorage.setItem("florence."+key, String(val)); }catch(e){}
+}
+function clampInt(v, def, lo, hi){
+  const n = parseInt(v,10);
+  if(!isFinite(n)) return def;
+  return Math.min(hi, Math.max(lo, n));
+}
+
+const KIOSK = PARAMS.has("kiosk");
+let LOOP = KIOSK || PARAMS.get("loop")==="1" || (!PARAMS.has("loop") && pref("loop","0")==="1");
+let AUTO = KIOSK || PARAMS.get("auto")==="1" ||
+           (!PARAMS.has("auto") && PARAMS.get("auto")!=="0" && pref("auto","1")==="1");
+const REFRESH_MS = clampInt(PARAMS.get("refresh"), 300, 30, 86400) * 1000;
+if(KIOSK) document.body.classList.add("kiosk");
+
+/* ---------- magnitude helpers ---------- */
+function magColor(m){
+  if(m==null) return "#6b7280";
+  if(m<2.5) return "#46E3B3";
+  if(m<4.5) return "#FFB000";
+  if(m<6.0) return "#FF7A1A";
+  if(m<7.0) return "#FF3D5E";
+  return "#FF2D2D";
+}
+function magRadius(m){ const v=(m==null?1:m); return Math.max(4, 3 + v*1.9); }
+
+/* ---------- witty quips ---------- */
+const QUIPS = {
+  micro:[
+    "Florence touches down near {place}. M{mag}, a tremor so faint it apologised on the way out.",
+    "{place}: M{mag}. Florence's espresso did not so much as shiver. She is unimpressed.",
+    "A M{mag} flutter beneath {place}. Florence double-checks the seismograph, then orders dessert.",
+    "{place} musters a M{mag}. Florence has felt firmer handshakes from a sleepy cat.",
+    "M{mag} under {place}. Florence files it under 'cute' and moves on."
+  ],
+  light:[
+    "Florence lands in {place}. M{mag}, {depth} km down. A tidy little rumble. She tips her hat to the fault.",
+    "{place} serves a M{mag}. Florence feels it in her ankles and, faintly, in her travel insurance.",
+    "M{mag} near {place}. Florence's window seat now comes with a complimentary wobble.",
+    "{place}: M{mag}. The teacups rattle politely. Florence rattles back.",
+    "A M{mag} greeting from {place}. Florence notes the floor is 'enthusiastic today'."
+  ],
+  moderate:[
+    "Florence arrives in {place} to a M{mag} reception. The crockery has strong opinions.",
+    "M{mag}, {depth} km below {place}. Florence grips the armrest of the tectonic plate.",
+    "{place}: a M{mag} handshake, firm and entirely unsolicited. Filed under 'memorable'.",
+    "Florence touches down at {place}. M{mag}. The pictures on the wall have gone abstract.",
+    "M{mag} beneath {place}. Florence's luggage takes a short, unscheduled hop."
+  ],
+  strong:[
+    "Florence lands in {place}. M{mag}. The ground has stopped suggesting and started insisting.",
+    "M{mag} under {place}. Florence's suitcase has filed for independence.",
+    "{place} delivers a M{mag}. Florence quietly reconsiders the entire itinerary.",
+    "Florence touches down at {place}. M{mag}, {depth} km down. She is now holding onto the horizon.",
+    "M{mag} near {place}. The vending machines are mobile. So, briefly, is Florence."
+  ],
+  major:[
+    "Florence lands in {place}. M{mag}. This is not a layover, this is a reckoning.",
+    "M{mag}, {depth} km beneath {place}. Florence is, at this point, basically a seismograph.",
+    "{place}: M{mag}. Florence would like a word with the manager of plate tectonics.",
+    "Florence touches down at {place}. M{mag}. The map itself appears to be flinching.",
+    "M{mag} under {place}. Florence packs lighter next time. Possibly just a helmet."
+  ]
+};
+function seedFrom(s){ let h=0; s=String(s); for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return h; }
+function bucketOf(m){ if(m==null||m<2.5)return"micro"; if(m<4.5)return"light"; if(m<6.0)return"moderate"; if(m<7.0)return"strong"; return"major"; }
+function quipFor(q){
+  const seed=seedFrom(q.id||q.place||"x");
+  const list=QUIPS[bucketOf(q.mag)];
+  let txt=list[seed%list.length];
+  txt=txt.split("{place}").join(q.place||"parts unknown")
+         .split("{mag}").join(q.mag==null?"?":q.mag.toFixed(1))
+         .split("{depth}").join(Math.round(q.depth));
+  // one optional flavour line
+  if(q.tsunami) txt+=" Tsunami flag raised. Florence eyes the exits.";
+  else if(q.depth<15 && seed%3===0) txt+=" Shallow and rude, right under the surface.";
+  else if(q.depth>300 && seed%3===1) txt+=" So deep it rattled the planet's basement.";
+  return txt;
+}
+
+/* ---------- geo math ---------- */
+const toR=Math.PI/180;
+function shortLon(d){ while(d>180)d-=360; while(d<-180)d+=360; return d; }
+function distDeg(a,b){
+  const dLat=b.lat-a.lat, dLon=shortLon(b.lon-a.lon)*Math.cos((a.lat+b.lat)/2*toR);
+  return Math.sqrt(dLat*dLat+dLon*dLon);
+}
+function lerpPos(a,b,p){
+  const dLon=shortLon(b.lon-a.lon);
+  let lon=a.lon+dLon*p; while(lon>180)lon-=360; while(lon<-180)lon+=360;
+  return {lat:a.lat+(b.lat-a.lat)*p, lon};
+}
+function easeInOut(t){ return t<0.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2; }
+
+/* ---------- time format ---------- */
+function fmtAgo(ms){
+  const s=Math.max(0,(Date.now()-ms)/1000);
+  if(s<3600) return Math.round(s/60)+"m ago";
+  if(s<86400) return Math.round(s/3600)+"h ago";
+  return Math.round(s/86400)+"d ago";
+}
+function fmtTime(ms){
+  try{ return new Date(ms).toLocaleString([], {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}); }
+  catch(e){ return new Date(ms).toISOString(); }
+}
+
+/* ---------- map setup ---------- */
+const map = L.map("map",{worldCopyJump:true,zoomControl:true,attributionControl:true,minZoom:2})
+  .setView([18,5],2.4);
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{
+  subdomains:"abcd", maxZoom:19,
+  attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a> · quakes <a href="https://earthquake.usgs.gov/">USGS</a>'
+}).addTo(map);
+
+const routeLine = L.polyline([],{color:"#FFB000",weight:1.4,opacity:.5,dashArray:"1 7",lineCap:"round"}).addTo(map);
+const activeSeg = L.polyline([],{color:"#FFB000",weight:1.6,opacity:.85,dashArray:"1 6",lineCap:"round"}).addTo(map);
+
+let markerLayer = L.layerGroup().addTo(map);
+let markers = [];
+
+// Florence
+const florenceIcon = L.divIcon({className:"",iconSize:[0,0],html:
+  '<div class="florence" id="flo"><div class="fbubble" id="fbubble"></div>'+
+  '<div class="fveh-wrap"><span class="fveh" id="fveh">✈️</span></div></div>'});
+const florence = L.marker([0,0],{icon:florenceIcon,interactive:false,zIndexOffset:1000,keyboard:false});
+const haloIcon = L.divIcon({className:"",iconSize:[0,0],html:'<div class="halo"><span id="halospan"></span></div>'});
+const halo = L.marker([0,0],{icon:haloIcon,interactive:false,zIndexOffset:500,keyboard:false});
+
+/* ---------- state ---------- */
+let quakes=[];
+let idx=0;
+let playing=false;
+let speed=1;
+let leg=null;       // {from,to,dur,prog,last}
+let rafId=null;
+let dwellTimer=null;
+let completed=[];   // visited latlngs
+let isDemo=false;
+let autoTimer=null;
+let lastSig="";     // signature of last-loaded feed, to detect real changes
+
+/* ---------- DOM ---------- */
+const $=id=>document.getElementById(id);
+const elFeed=$("feed"), elCount=$("count"), elUpdated=$("updated");
+const elNP=$("np"), elNStats=$("nstats"), elNTel=$("ntel");
+const elLog=$("log"), elStampCount=$("stampcount");
+const elPlay=$("play"), elCur=$("cur"), elTotal=$("total");
+const elSpeed=$("speed"), elSpeedVal=$("speedval");
+const elStatus=$("status"), elStatusTxt=$("statustxt"), elBanner=$("banner");
+const elSrcDot=$("srcdot"), elSrcTxt=$("srctxt"), elAutoBtn=$("autobtn");
+const elLoop=$("loop"), elFs=$("fs");
+
+/* feed + legend init */
+FEEDS.forEach(f=>{const o=document.createElement("option");o.value=f.id;o.textContent=f.label;elFeed.appendChild(o);});
+// the server accepts all 20 USGS summary feeds; the dropdown shows a curated 5,
+// but ?feed=<any valid id> (or a saved pref) can still select the other 15.
+const ALL_FEEDS=[];
+["significant","4.5","2.5","1.0","all"].forEach(s=>["hour","day","week","month"].forEach(w=>ALL_FEEDS.push(s+"_"+w)));
+function prettyFeed(id){
+  const p=id.split("_");
+  const S={significant:"Significant","4.5":"M4.5+","2.5":"M2.5+","1.0":"M1.0+",all:"All quakes"}[p[0]]||p[0];
+  const W={hour:"past hour",day:"past 24 hours",week:"past 7 days",month:"past 30 days"}[p[1]]||p[1];
+  return S+" · "+W;
+}
+const startFeed = PARAMS.get("feed") || pref("feed","4.5_week");
+if(ALL_FEEDS.indexOf(startFeed)!==-1 && !FEEDS.some(f=>f.id===startFeed)){
+  const o=document.createElement("option");o.value=startFeed;o.textContent=prettyFeed(startFeed);elFeed.appendChild(o);
+}
+elFeed.value = ALL_FEEDS.indexOf(startFeed)!==-1 ? startFeed : "4.5_week";
+["#46E3B3","#FFB000","#FF7A1A","#FF3D5E","#FF2D2D"].forEach(c=>{const d=document.createElement("div");d.className="sw";d.style.background=c;$("legscale").appendChild(d);});
+
+/* ---------- data source indicator ---------- */
+const SOURCES = {
+  live:    {c:"#46E3B3", t:"LIVE · USGS"},
+  direct:  {c:"#46E3B3", t:"LIVE · DIRECT"},
+  cached:  {c:"#FFB000", t:"CACHED"},
+  demo:    {c:"#FF3D5E", t:"DEMO DATA"},
+  offline: {c:"#FF2D2D", t:"OFFLINE"},
+  loading: {c:"#828B99", t:"CONNECTING…"},
+};
+function setSource(kind){
+  const s = SOURCES[kind] || SOURCES.loading;
+  elSrcDot.style.background = s.c;
+  elSrcDot.style.boxShadow = "0 0 8px "+s.c;
+  elSrcTxt.textContent = s.t;
+}
+
+/* ---------- data loading ---------- */
+function showStatus(t){ elStatusTxt.textContent=t; elStatus.style.display="block"; }
+function hideStatus(){ elStatus.style.display="none"; }
+function showBanner(t){ elBanner.textContent=t; elBanner.style.display="block"; }
+function hideBanner(){ elBanner.style.display="none"; }
+
+// Try the local caching proxy first; fall back to USGS directly. Returns
+// {data, source} where source is one of live | cached | direct.
+async function fetchFeed(id){
+  if(!ON_FILE){
+    try{
+      const r = await fetch(LOCAL_API+encodeURIComponent(id), {cache:"no-store"});
+      if(r.ok){
+        const tag = r.headers.get("X-Florence-Cache");   // fresh|live|stale (proxy) or null
+        const data = await r.json();
+        return {data, source: tag==="stale" ? "cached" : "live"};
+      }
+    }catch(e){ /* proxy missing/unreachable -> fall through to direct USGS */ }
+  }
+  const r2 = await fetch(FEED_BASE+id+".geojson",{cache:"no-store"});
+  if(!r2.ok) throw new Error("HTTP "+r2.status);
+  return {data: await r2.json(), source:"direct"};
+}
+
+function feedSignature(features){
+  if(!features || !features.length) return "0";
+  let maxT=-1, top="";
+  for(const f of features){
+    const t=(f.properties&&f.properties.time)||0;
+    if(t>maxT){ maxT=t; top=f.id||""; }
+  }
+  return features.length+":"+top+":"+maxT;
+}
+
+async function loadFeed(id){
+  stopTour();
+  hideBanner(); isDemo=false;
+  setSource("loading");
+  showStatus("Scanning the planet…");
+  try{
+    const {data, source} = await fetchFeed(id);
+    const features = data.features||[];
+    lastSig = feedSignature(features);
+    buildItinerary(features);
+    setSource(source);
+    elUpdated.textContent = labelFor(source);
+    if(quakes.length===0){
+      showBanner("No earthquakes reported in this window. Try a wider feed.");
+      elCount.textContent="0"; elTotal.textContent="0"; elCur.textContent="0";
+      hideStatus(); scheduleAutoRefresh(); return;
+    }
+    hideStatus();
+    startTour(true);
+  }catch(err){
+    console.warn("feed error",err);
+    loadDemo();
+    setSource("demo");
+    showBanner("Live USGS feed unreachable. Showing clearly-labelled DEMO data (fictional epicentres). Florence soldiers on; check the network and hit Refresh.");
+    hideStatus();
+    startTour(true);
+  }
+  scheduleAutoRefresh();
+}
+
+function labelFor(source){
+  const now = new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+  if(source==="cached") return "cached · "+now;
+  if(source==="direct") return "USGS direct · "+now;
+  return "USGS · "+now;
+}
+
+function toQuake(f){
+  const c=f.geometry&&f.geometry.coordinates||[];
+  return {
+    id:f.id, mag:(typeof f.properties.mag==="number"?f.properties.mag:null),
+    place:f.properties.place||f.properties.title||"unknown location",
+    time:f.properties.time, depth:(typeof c[2]==="number"?c[2]:0),
+    lat:c[1], lon:c[0], tsunami:f.properties.tsunami===1,
+    url:f.properties.url
+  };
+}
+function buildItinerary(features){
+  let arr=features.map(toQuake).filter(q=>isFinite(q.lat)&&isFinite(q.lon));
+  arr.sort((a,b)=>b.time-a.time);           // newest first
+  if(arr.length>MAX_STOPS) arr=arr.slice(0,MAX_STOPS);
+  arr.sort((a,b)=>a.time-b.time);           // then chronological
+  quakes=arr;
+  elCount.textContent=String(quakes.length)+(features.length>quakes.length?" / "+features.length:"");
+  elTotal.textContent=String(quakes.length);
+  renderMarkers();
+}
+function loadDemo(){
+  isDemo=true;
+  const now=Date.now(), H=3600000;
+  const raw=[
+    ["DEMO-1","Demo Ridge (fictional)",  3.2,  10,  12,  -8],
+    ["DEMO-2","Sample Fault (fictional)", 4.8,  35,  41,  44],
+    ["DEMO-3","Placeholder Trench (fictional)",6.3,28,138,36],
+    ["DEMO-4","Mock Caldera (fictional)", 2.1,   5,-122, 38],
+    ["DEMO-5","Example Rise (fictional)", 5.5,  60, -71,-33],
+    ["DEMO-6","Testing Basin (fictional)",7.1,  18, 122,  1],
+    ["DEMO-7","Synthetic Scarp (fictional)",4.2,90, 25, 39],
+    ["DEMO-8","Dummy Seamount (fictional)",6.7,310,179,-20]
+  ];
+  quakes=raw.map((d,i)=>({id:d[0],place:d[1],mag:d[2],depth:d[3],lon:d[4],lat:d[5],
+    time:now-(raw.length-i)*5*H,tsunami:d[2]>=6.5,url:null}));
+  elCount.textContent="8 (demo)"; elTotal.textContent="8";
+  elUpdated.textContent="demo data";
+  lastSig="demo";
+  renderMarkers();
+}
+
+/* ---------- auto-refresh ---------- */
+function scheduleAutoRefresh(){
+  clearTimeout(autoTimer);
+  if(!AUTO) return;
+  autoTimer=setTimeout(refreshTick, REFRESH_MS);
+}
+async function refreshTick(){
+  // Only disrupt the view to ingest new data while the tour is running or in
+  // kiosk/loop mode -- a paused user exploring manually is left alone.
+  if(AUTO && (playing || KIOSK || LOOP)){
+    try{
+      const {data, source} = await fetchFeed(elFeed.value);
+      const features = data.features||[];
+      const sig = feedSignature(features);
+      setSource(source);
+      elUpdated.textContent = labelFor(source);
+      if(sig!==lastSig){
+        lastSig=sig;
+        isDemo=false;
+        buildItinerary(features);
+        if(quakes.length) startTour(true);
+      }
+    }catch(e){ setSource("offline"); }
+  }
+  scheduleAutoRefresh();
+}
+
+function renderMarkers(){
+  markerLayer.clearLayers(); markers=[];
+  quakes.forEach((q,i)=>{
+    const m=L.circleMarker([q.lat,q.lon],{
+      radius:magRadius(q.mag), color:magColor(q.mag), weight:1,
+      fillColor:magColor(q.mag), fillOpacity:.45
+    });
+    m.bindTooltip("M"+(q.mag==null?"?":q.mag.toFixed(1))+" · "+escapeHtml(q.place),{direction:"top",opacity:.95});
+    m.on("click",()=>jumpTo(i));
+    m.addTo(markerLayer); markers.push(m);
+  });
+}
+function highlightCurrent(i){
+  markers.forEach((m,j)=>{
+    const q=quakes[j];
+    m.setStyle({weight:j===i?2.5:1, color:j===i?"#fff":magColor(q.mag),
+      fillOpacity:j===i?.85:.45});
+    if(j===i) m.bringToFront();
+  });
+  const q=quakes[i];
+  halo.setLatLng([q.lat,q.lon]).addTo(map);
+  const span=$("halospan"); if(span) span.style.borderColor=magColor(q.mag);
+}
+
+/* ---------- tour engine ---------- */
+function setSpeedFromSlider(){ speed=elSpeed.value/2; elSpeedVal.textContent=speed+"x"; setPref("speed",elSpeed.value); }
+elSpeed.value = clampInt(PARAMS.get("speed"), clampInt(pref("speed","2"),2,1,8), 1, 8);
+elSpeed.addEventListener("input",setSpeedFromSlider); setSpeedFromSlider();
+
+function setVehDir(from,to){
+  const veh=$("fveh"); if(!veh) return;
+  const east=shortLon(to.lon-from.lon)>=0;
+  veh.style.transform="scaleX("+(east?1:-1)+")";
+}
+function showBubble(text){
+  const b=$("fbubble"); if(!b) return;
+  b.textContent=text; b.classList.add("show");
+}
+function hideBubble(){ const b=$("fbubble"); if(b) b.classList.remove("show"); }
+
+function startTour(autoplay){
+  stopTour();   // tear down any in-flight tour so we never stack two animation loops
+  florence.addTo(map);
+  completed=[]; routeLine.setLatLngs([]); activeSeg.setLatLngs([]);
+  elLog.innerHTML=""; elStampCount.textContent="0";
+  idx=0;
+  arriveAt(0,true);
+  if(autoplay){ playing=true; updatePlayBtn(); scheduleNext(700); }
+  else { playing=false; updatePlayBtn(); }
+}
+function stopTour(){
+  playing=false;
+  if(rafId){ cancelAnimationFrame(rafId); rafId=null; }
+  clearTimeout(dwellTimer);
+  leg=null;
+  updatePlayBtn();
+}
+function updatePlayBtn(){
+  const atEnd = idx>=quakes.length-1 && !leg && !playing;
+  elPlay.textContent = playing ? "❚❚" : (atEnd ? "↻" : "▶");
+  elPlay.title = playing ? "Pause" : (atEnd ? "Replay tour" : "Play");
+}
+
+function arriveAt(i,instant){
+  idx=i;
+  const q=quakes[i];
+  florence.setLatLng([q.lat,q.lon]);
+  const flo=$("flo");
+  if(flo){ flo.classList.remove("flying"); flo.classList.add("landed");
+    setTimeout(()=>{ const f=$("flo"); if(f) f.classList.remove("landed"); },560); }
+  // route
+  if(completed.length===0 || completed[completed.length-1][0]!==q.lat || completed[completed.length-1][1]!==q.lon){
+    completed.push([q.lat,q.lon]); routeLine.setLatLngs(completed);
+  }
+  activeSeg.setLatLngs([]);
+  highlightCurrent(i);
+  updateCard(q);
+  showBubble(quipFor(q));
+  addStamp(q,i);
+  elCur.textContent=String(i+1);
+  // camera
+  if(instant) map.setView([q.lat,q.lon], Math.max(map.getZoom(),3.2),{animate:false});
+  else map.flyTo([q.lat,q.lon], 4, {duration:.8});
+  updatePlayBtn();
+}
+
+function beginLegTo(target){
+  const from=quakes[idx], to=quakes[target];
+  const d=distDeg(from,to);
+  const dur=Math.min(4500, 800+d*22)/speed;
+  leg={from,to,target,dur,prog:0,last:null};
+  setVehDir(from,to);
+  const flo=$("flo"); if(flo){ flo.classList.add("flying"); }
+  hideBubble();
+  // frame both endpoints
+  const b=L.latLngBounds([[from.lat,from.lon],[to.lat,to.lon]]).pad(0.55);
+  map.flyToBounds(b,{duration:Math.min(1.3,dur/1000),maxZoom:5});
+  rafId=requestAnimationFrame(animFrame);
+}
+function animFrame(ts){
+  if(!playing||!leg){ rafId=null; return; }
+  if(leg.last==null) leg.last=ts;
+  leg.prog += (ts-leg.last)/leg.dur; leg.last=ts;
+  const p=Math.min(1,leg.prog), e=easeInOut(p);
+  const pos=lerpPos(leg.from,leg.to,e);
+  florence.setLatLng([pos.lat,pos.lon]);
+  activeSeg.setLatLngs([[leg.from.lat,leg.from.lon],[pos.lat,pos.lon]]);
+  if(p>=1){ const t=leg.target; leg=null; rafId=null; arriveAt(t,false); scheduleNext(0); return; }
+  rafId=requestAnimationFrame(animFrame);
+}
+function scheduleNext(extra){
+  clearTimeout(dwellTimer);
+  if(!playing) return;
+  if(idx>=quakes.length-1){ tourComplete(); return; }
+  dwellTimer=setTimeout(()=>{ if(playing) beginLegTo(idx+1); }, (1300/speed)+extra);
+}
+function tourComplete(){
+  playing=false; updatePlayBtn();
+  elNP.textContent="Tour complete — "+quakes.length+" epicentres survived";
+  elNTel.innerHTML="Florence unpacks, briefly, and waits for the planet to do something interesting again.<span class=\"cur\"></span>";
+  // loop / kiosk: take a breath, then run the itinerary again
+  if(LOOP || KIOSK){
+    clearTimeout(dwellTimer);
+    dwellTimer=setTimeout(()=>{ if(LOOP||KIOSK) startTour(true); }, 6000);
+  }
+}
+
+/* manual nav */
+function jumpTo(i){
+  if(i<0||i>=quakes.length) return;
+  if(rafId){ cancelAnimationFrame(rafId); rafId=null; } leg=null; clearTimeout(dwellTimer);
+  arriveAt(i,false);
+  if(playing) scheduleNext(0);
+}
+
+/* ---------- UI cards ---------- */
+function updateCard(q){
+  elNP.textContent=q.place;
+  const items=[];
+  items.push('<div class="stat"><div class="k">Mag</div><div class="v magchip"><i style="background:'+magColor(q.mag)+'"></i>'+(q.mag==null?"?":q.mag.toFixed(1))+'</div></div>');
+  items.push('<div class="stat"><div class="k">Depth</div><div class="v">'+Math.round(q.depth)+' km</div></div>');
+  items.push('<div class="stat"><div class="k">When</div><div class="v" style="font-size:12px">'+fmtAgo(q.time)+'</div></div>');
+  if(q.tsunami) items.push('<div class="stat tsunami"><div class="k">Alert</div><div class="v" style="font-size:12px">⚠ TSUNAMI</div></div>');
+  elNStats.innerHTML=items.join("");
+  elNTel.innerHTML=escapeHtml(quipFor(q))+'<span class="cur"></span>';
+}
+function addStamp(q,i){
+  const div=document.createElement("div");
+  div.className="stamp";
+  div.innerHTML='<div class="no">'+String(i+1).padStart(2,"0")+'</div>'+
+    '<div class="mg" style="color:'+magColor(q.mag)+'">'+(q.mag==null?"?":q.mag.toFixed(1))+'</div>'+
+    '<div class="sp">'+escapeHtml(q.place)+'<br><span style="opacity:.6">'+fmtTime(q.time)+'</span></div>';
+  div.onclick=()=>jumpTo(i);
+  elLog.prepend(div);
+  elStampCount.textContent=String(elLog.children.length);
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+
+/* ---------- controls ---------- */
+elPlay.addEventListener("click",()=>{
+  if(idx>=quakes.length-1 && !leg && !playing){ startTour(true); return; }
+  playing=!playing; updatePlayBtn();
+  if(playing){ if(leg){ leg.last=null; rafId=requestAnimationFrame(animFrame); } else scheduleNext(0); }
+  else { if(rafId){cancelAnimationFrame(rafId);rafId=null;} clearTimeout(dwellTimer); }
+});
+$("next").addEventListener("click",()=>jumpTo(Math.min(quakes.length-1,idx+1)));
+$("prev").addEventListener("click",()=>jumpTo(Math.max(0,idx-1)));
+$("refresh").addEventListener("click",()=>loadFeed(elFeed.value));
+elFeed.addEventListener("change",()=>{ setPref("feed",elFeed.value); loadFeed(elFeed.value); });
+
+/* auto-refresh toggle */
+function updateAutoBtn(){ elAutoBtn.classList.toggle("on",AUTO); elAutoBtn.textContent = AUTO?"AUTO ✓":"AUTO"; }
+elAutoBtn.addEventListener("click",()=>{
+  AUTO=!AUTO; setPref("auto",AUTO?"1":"0"); updateAutoBtn();
+  if(AUTO) scheduleAutoRefresh(); else clearTimeout(autoTimer);
+});
+updateAutoBtn();
+
+/* loop toggle */
+function updateLoopBtn(){ elLoop.classList.toggle("on",LOOP); }
+elLoop.addEventListener("click",()=>{
+  LOOP=!LOOP; setPref("loop",LOOP?"1":"0"); updateLoopBtn();
+  // if we're sitting at a finished tour, kick it back off immediately
+  if(LOOP && !playing && idx>=quakes.length-1 && quakes.length) startTour(true);
+});
+updateLoopBtn();
+
+/* fullscreen toggle */
+function toggleFullscreen(){
+  const d=document, el=d.documentElement;
+  let p;
+  if(!d.fullscreenElement && !d.webkitFullscreenElement){
+    p=(el.requestFullscreen||el.webkitRequestFullscreen||function(){}).call(el);
+  }else{
+    p=(d.exitFullscreen||d.webkitExitFullscreen||function(){}).call(d);
+  }
+  if(p && p.catch) p.catch(function(){});   // ignore "needs user gesture" rejections
+}
+elFs.addEventListener("click",toggleFullscreen);
+
+document.addEventListener("keydown",e=>{
+  if(["INPUT","SELECT","TEXTAREA"].includes(document.activeElement.tagName)) return;
+  if(e.code==="Space"){ e.preventDefault(); elPlay.click(); }
+  else if(e.code==="ArrowRight"){ jumpTo(Math.min(quakes.length-1,idx+1)); }
+  else if(e.code==="ArrowLeft"){ jumpTo(Math.max(0,idx-1)); }
+  else if(e.code==="KeyF"){ toggleFullscreen(); }
+  else if(e.code==="KeyL"){ elLoop.click(); }
+});
+
+/* keep the map sized correctly through rotations / window changes */
+window.addEventListener("resize",()=>{ if(map) map.invalidateSize(); });
+
+/* ---------- go ---------- */
+loadFeed(elFeed.value);
+</script>
+</body>
+</html>

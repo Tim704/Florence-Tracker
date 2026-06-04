@@ -1,0 +1,13 @@
+# local feed cache (regenerated at runtime)
+cache/
+.cache_test/
+
+# python
+__pycache__/
+*.pyc
+
+# kiosk-setup backups
+*.florence.bak.*
+
+# macOS
+.DS_Store

@@ -1,0 +1,12 @@
+.git
+.gitignore
+cache/
+.cache_test/
+*.bak
+*.florence.bak.*
+deploy/
+Makefile
+README.md
+florence-seismic-bureau.html
+__pycache__/
+*.pyc
