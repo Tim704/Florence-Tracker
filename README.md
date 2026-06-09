@@ -1,7 +1,7 @@
 # Florence's Seismic Travel Bureau
 
 A live earthquake visualiser. **Florence** — one tireless traveller — flies between
-real USGS earthquake epicentres in chronological order on a dark Leaflet map,
+real USGS earthquake epicentres in chronological order on a warm paper Leaflet map,
 stamping her passport and filing wry telegrams about each one.
 
 This repo is packaged to run on a **Raspberry Pi**: either as a small always-on
@@ -208,7 +208,7 @@ florence-tracker/
 ├── Dockerfile                   multi-arch (arm64 + arm/v7) image
 ├── docker-compose.yml           one-command container deploy
 ├── Makefile                     run / install / kiosk / docker shortcuts
-└── florence-seismic-bureau.html original single-file version (kept as a backup)
+└── florence-seismic-bureau.html standalone single-file version (Warm Almanac theme, CDN Leaflet)
 ```
 
 Data: live earthquake feeds © [USGS](https://earthquake.usgs.gov/). Map tiles ©
